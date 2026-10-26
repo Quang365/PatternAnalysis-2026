@@ -11,9 +11,11 @@ The custom PyTorch training loop will be added in the next stage.
 
 import argparse
 import random
+import math
 
 import numpy as np
 import torch
+from torch.optim import AdamW
 
 from dataset import (
     MODEL_NAME,
@@ -62,6 +64,22 @@ def parse_args():
         "--output_dir",
         type=str,
         default="outputs",
+    )
+
+    # Limit optimizer updates for quick training smoke tests.
+    # A value of 0 means no limit.
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=0,
+        help="Maximum optimizer steps; 0 means no limit.",
+    )
+
+    # Maximum gradient norm used for gradient clipping.
+    parser.add_argument(
+        "--max_grad_norm",
+        type=float,
+        default=1.0,
     )
 
     return parser.parse_args()
@@ -211,6 +229,174 @@ def inspect_forward_pass(model, dataloader, device):
 
     print("Forward pass completed successfully.")
 
+def train_one_epoch(model, dataloader, optimizer, device, args):
+    """
+    Train FLAN-T5 for one epoch using a custom PyTorch training loop.
+
+    Supports:
+        - Full fine-tuning and LoRA
+        - Gradient accumulation
+        - Gradient clipping
+        - Optional optimizer-step limit
+
+    Args:
+        model: FLAN-T5 model.
+        dataloader: Training DataLoader.
+        optimizer: PyTorch optimizer.
+        device (torch.device): Computation device.
+        args (argparse.Namespace): Training configuration.
+
+    Returns:
+        tuple: Average training loss and number of optimizer steps.
+    """
+
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+
+    total_loss = 0.0
+    total_batches = 0
+    optimizer_steps = 0
+
+    accumulation_steps = args.gradient_accumulation_steps
+    num_batches = len(dataloader)
+
+    print("\n=== Training Epoch ===")
+
+    for batch_index, batch in enumerate(dataloader):
+
+        # Transfer the current batch to the computation device.
+        batch = {
+            key: value.to(device)
+            for key, value in batch.items()
+        }
+
+        # Forward pass: calculate sequence-to-sequence loss.
+        outputs = model(**batch)
+        loss = outputs.loss
+
+        if not torch.isfinite(loss).item():
+            raise RuntimeError(
+                f"Non-finite training loss at batch {batch_index + 1}"
+            )
+
+        # Keep the original loss for logging.
+        total_loss += loss.item()
+        total_batches += 1
+
+        # Determine the size of the current accumulation group.
+        group_start = (
+            batch_index // accumulation_steps
+        ) * accumulation_steps
+
+        group_size = min(
+            accumulation_steps,
+            num_batches - group_start,
+        )
+
+        scaled_loss = loss / group_size
+
+        # Backpropagation.
+        scaled_loss.backward()
+
+        # Scale loss before accumulating gradients.
+        is_last_batch = batch_index + 1 == num_batches
+
+        # Update weights after enough mini-batches or at epoch end.
+        should_update = (
+            (batch_index + 1) % accumulation_steps == 0
+            or is_last_batch
+        )
+
+        if should_update:
+
+            # Prevent excessively large gradients.
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=args.max_grad_norm,
+            )
+
+            # Apply one optimizer update.
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            optimizer_steps += 1
+
+            print(
+                f"Optimizer step {optimizer_steps} | "
+                f"Batch {batch_index + 1}/{num_batches} | "
+                f"Loss: {loss.item():.4f}"
+            )
+
+            # Stop early when running a smoke test.
+            if (
+                args.max_train_steps > 0
+                and optimizer_steps >= args.max_train_steps
+            ):
+                break
+
+    average_loss = total_loss / total_batches
+
+    print(f"\nAverage training loss: {average_loss:.4f}")
+    print(f"Optimizer steps completed: {optimizer_steps}")
+
+    return average_loss, optimizer_steps
+
+def run_training(model, train_loader, device, args):
+    """
+    Initialise the optimizer and execute the training loop.
+
+    Args:
+        model: FLAN-T5 model.
+        train_loader: Training DataLoader.
+        device (torch.device): Computation device.
+        args (argparse.Namespace): Training configuration.
+    """
+
+    model = model.to(device)
+
+    # Only optimize trainable parameters.
+    # For LoRA, frozen pretrained parameters are excluded.
+    trainable_parameters = [
+        parameter
+        for parameter in model.parameters()
+        if parameter.requires_grad
+    ]
+
+    optimizer = AdamW(
+        trainable_parameters,
+        lr=args.learning_rate,
+    )
+
+    print("\n=== Training Started ===")
+    print(f"Method: {args.method}")
+    print(f"Device: {device}")
+
+    total_optimizer_steps = 0
+
+    for epoch in range(args.epochs):
+
+        print(f"\nEpoch {epoch + 1}/{args.epochs}")
+
+        _, completed_steps = train_one_epoch(
+            model=model,
+            dataloader=train_loader,
+            optimizer=optimizer,
+            device=device,
+            args=args,
+        )
+
+        total_optimizer_steps += completed_steps
+
+        # Stop once the requested smoke-test limit is reached.
+        if (
+            args.max_train_steps > 0
+            and total_optimizer_steps >= args.max_train_steps
+        ):
+            break
+
+    print("\nTraining completed successfully.")
+    print(f"Total optimizer steps: {total_optimizer_steps}")
+
 def main():
     """Initialise the training configuration and selected model."""
 
@@ -285,9 +471,15 @@ def main():
     # Verify that the model can calculate loss from a tokenized batch.
     inspect_forward_pass(model, train_loader, device)
 
-    print("\nTraining configuration initialised successfully.")
-    print("Training loop has not been implemented yet.")
+    # Execute the custom PyTorch training loop.
+    run_training(
+        model=model,
+        train_loader=train_loader,
+        device=device,
+        args=args,
+    )
 
+    print("\nTraining configuration initialised successfully.")
 
 if __name__ == "__main__":
     main()
