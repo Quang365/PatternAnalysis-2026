@@ -341,7 +341,59 @@ def train_one_epoch(model, dataloader, optimizer, device, args):
 
     return average_loss, optimizer_steps
 
-def run_training(model, train_loader, device, args):
+def validate(model, dataloader, device):
+    """
+    Evaluate the model on the validation dataset.
+
+    This function calculates average validation loss without
+    computing gradients or updating model parameters.
+
+    Args:
+        model: FLAN-T5 model.
+        dataloader: Validation DataLoader.
+        device (torch.device): Computation device.
+
+    Returns:
+        float: Average validation loss.
+    """
+
+    model.eval()
+
+    total_loss = 0.0
+    total_batches = 0
+
+    print("\n=== Validation ===")
+
+    with torch.no_grad():
+
+        for batch in dataloader:
+
+            # Move validation tensors to the selected device.
+            batch = {
+                key: value.to(device)
+                for key, value in batch.items()
+            }
+
+            # Calculate validation loss.
+            outputs = model(**batch)
+            loss = outputs.loss
+
+            if not torch.isfinite(loss).item():
+                raise RuntimeError("Non-finite validation loss detected")
+
+            total_loss += loss.item()
+            total_batches += 1
+
+    if total_batches == 0:
+        raise ValueError("Validation DataLoader is empty")
+
+    average_loss = total_loss / total_batches
+
+    print(f"Average validation loss: {average_loss:.4f}")
+
+    return average_loss
+
+def run_training(model, train_loader, val_loader, device, args):
     """
     Initialise the optimizer and execute the training loop.
 
@@ -386,6 +438,18 @@ def run_training(model, train_loader, device, args):
         )
 
         total_optimizer_steps += completed_steps
+
+                # Evaluate the model after each training epoch.
+        validation_loss = validate(
+            model=model,
+            dataloader=val_loader,
+            device=device,
+        )
+
+        print(
+            f"\nEpoch {epoch + 1} Summary | "
+            f"Validation Loss: {validation_loss:.4f}"
+        )
 
         # Stop once the requested smoke-test limit is reached.
         if (
@@ -475,6 +539,7 @@ def main():
     run_training(
         model=model,
         train_loader=train_loader,
+        val_loader=val_loader,
         device=device,
         args=args,
     )

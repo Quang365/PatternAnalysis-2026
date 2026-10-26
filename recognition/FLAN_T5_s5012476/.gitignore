@@ -32,3 +32,6 @@ lightning_logs/
 # Local environment variables
 .env
 .env.*
+
+# Training outputs and checkpoints
+outputs/
