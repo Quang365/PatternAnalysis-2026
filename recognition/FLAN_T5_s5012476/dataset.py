@@ -1,7 +1,9 @@
 """Dataset loading and inspection for radiology report summarisation."""
 
 from datasets import load_dataset
+from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
+from transformers import DataCollatorForSeq2Seq
 
 
 DATASET_NAME = "BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track"
@@ -101,6 +103,24 @@ def preprocess_function(examples, tokenizer):
 
     return model_inputs
 
+def prepare_dataset(dataset, tokenizer, splits=("train", "validation")):
+    """Tokenize the requested dataset splits."""
+
+    tokenized_dataset = {}
+
+    for split in splits:
+        if split not in dataset:
+            raise ValueError(f"Missing dataset split: {split}")
+
+        tokenized_dataset[split] = dataset[split].map(
+            lambda examples: preprocess_function(examples, tokenizer),
+            batched=True,
+            remove_columns=dataset[split].column_names,
+            desc=f"Tokenizing {split}",
+        )
+
+    return tokenized_dataset
+
 def inspect_preprocessing(dataset, tokenizer):
     """Inspect tokenization results on a small training sample."""
 
@@ -137,6 +157,59 @@ def inspect_preprocessing(dataset, tokenizer):
 
     print("\nPreprocessing inspection completed successfully.")
 
+def create_dataloader(dataset, tokenizer, batch_size=4, shuffle=False):
+    """Create a PyTorch DataLoader with dynamic padding."""
+
+    collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer,
+        padding=True,
+        label_pad_token_id=-100,
+        return_tensors="pt",
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collator,
+    )
+
+def inspect_dataloader(dataset, tokenizer):
+    """Check dynamic padding and label masking on a small batch."""
+
+    sample = dataset["train"].select(range(8))
+
+    tokenized = sample.map(
+        lambda examples: preprocess_function(examples, tokenizer),
+        batched=True,
+        remove_columns=sample.column_names,
+    )
+
+    dataloader = create_dataloader(
+        tokenized,
+        tokenizer,
+        batch_size=4,
+        shuffle=False,
+    )
+
+    batch = next(iter(dataloader))
+
+    print("\n=== DataLoader Inspection ===")
+
+    for key, value in batch.items():
+        print(f"{key}: {tuple(value.shape)}")
+
+    assert batch["input_ids"].shape[0] == 4
+    assert batch["attention_mask"].shape == batch["input_ids"].shape
+    assert batch["labels"].shape[0] == 4
+
+    assert batch["input_ids"].shape[1] <= MAX_INPUT_LENGTH
+    assert batch["labels"].shape[1] <= MAX_TARGET_LENGTH
+
+    print(f"Padding tokens in labels: {(batch['labels'] == -100).sum().item()}")
+
+    print("\nDataLoader inspection completed successfully.")
+
 if __name__ == "__main__":
     dataset = load_radiology_dataset()
 
@@ -145,3 +218,5 @@ if __name__ == "__main__":
     tokenizer = load_tokenizer()
 
     inspect_preprocessing(dataset, tokenizer)
+
+    inspect_dataloader(dataset, tokenizer)
