@@ -169,6 +169,48 @@ def initialise_dataloaders(args):
 
     return train_loader, val_loader
 
+def inspect_forward_pass(model, dataloader, device):
+    """
+    Verify that FLAN-T5 can process a batch and calculate loss.
+
+    This smoke test runs a forward pass without computing gradients
+    or updating model parameters.
+
+    Args:
+        model: Initialised FLAN-T5 model.
+        dataloader: DataLoader containing tokenized radiology reports.
+        device (torch.device): Device used for computation.
+    """
+
+    print("\n=== Forward Pass Inspection ===")
+
+    # Move the model to the selected device.
+    model = model.to(device)
+    model.eval()
+
+    # Retrieve one batch from the training DataLoader.
+    batch = next(iter(dataloader))
+
+    # Move all tensors to the same device as the model.
+    batch = {
+        key: value.to(device)
+        for key, value in batch.items()
+    }
+
+    # Run the model without gradient computation.
+    with torch.no_grad():
+        outputs = model(**batch)
+
+    # Extract the sequence-to-sequence training loss.
+    loss = outputs.loss
+
+    print(f"Forward loss: {loss.item():.4f}")
+
+    # Verify that the model produces a valid numerical loss.
+    assert torch.isfinite(loss).item(), "Forward loss is not finite"
+
+    print("Forward pass completed successfully.")
+
 def main():
     """Initialise the training configuration and selected model."""
 
@@ -239,6 +281,9 @@ def main():
         print(f"{key}: {tuple(value.shape)}")
 
     print("\nModel and DataLoader integration completed successfully.")
+
+    # Verify that the model can calculate loss from a tokenized batch.
+    inspect_forward_pass(model, train_loader, device)
 
     print("\nTraining configuration initialised successfully.")
     print("Training loop has not been implemented yet.")
