@@ -1,0 +1,34 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Hugging Face cache
+.cache/
+huggingface/
+
+# Downloaded datasets and processed data
+data/
+datasets/
+processed_data/
+
+# Model checkpoints and weights
+checkpoints/
+outputs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Experiment tracking
+wandb/
+runs/
+lightning_logs/
+
+# Local environment variables
+.env
+.env.*
