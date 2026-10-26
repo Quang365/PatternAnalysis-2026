@@ -33,15 +33,39 @@ REQUIRED_COLUMNS = {
 
 
 def load_radiology_dataset():
-    """Load the official BioLaySumm2025 LaymanRRG dataset."""
+    """
+    Load the official BioLaySumm2025 LaymanRRG dataset.
+
+    The dataset contains radiology reports and their corresponding
+    layperson-friendly summaries.
+
+    Returns:
+        DatasetDict: Official train, validation, and test splits.
+    """
     return load_dataset(DATASET_NAME)
 
 def load_tokenizer():
-    """Load the tokenizer associated with FLAN-T5 Base."""
+    """
+    Load the tokenizer associated with the FLAN-T5 Base model.
+
+    The same tokenizer is used for both full fine-tuning and LoRA
+    to ensure consistent preprocessing across experiments.
+
+    Returns:
+        PreTrainedTokenizer: Tokenizer for FLAN-T5 Base.
+    """
     return AutoTokenizer.from_pretrained(MODEL_NAME)
 
 def inspect_dataset(dataset):
-    """Inspect dataset splits, columns, and sample records."""
+    """
+    Validate the dataset structure and inspect sample records.
+
+    Checks that all official splits exist, their sample counts match
+    expectations, and the required columns are available.
+
+    Args:
+        dataset (DatasetDict): Loaded BioLaySumm dataset.
+    """
 
     print("\n=== Dataset Inspection ===")
 
@@ -80,7 +104,22 @@ def inspect_dataset(dataset):
     print("\nDataset inspection completed successfully.")
 
 def preprocess_function(examples, tokenizer):
-    """Tokenize radiology reports and reference summaries."""
+    """
+    Convert radiology reports and reference summaries into token IDs.
+
+    Each report is prefixed with a natural-language instruction to
+    guide FLAN-T5 towards patient-friendly summarisation.
+
+    Both input and target sequences are truncated to their configured
+    maximum lengths. Padding is deferred to the DataLoader.
+
+    Args:
+        examples (dict): Batch containing radiology reports and summaries.
+        tokenizer: FLAN-T5 tokenizer.
+
+    Returns:
+        dict: Tokenized input_ids, attention_mask, and labels.
+    """
 
     inputs = [
         PROMPT + report
@@ -104,7 +143,21 @@ def preprocess_function(examples, tokenizer):
     return model_inputs
 
 def prepare_dataset(dataset, tokenizer, splits=("train", "validation")):
-    """Tokenize the requested dataset splits."""
+    """
+    Tokenize the specified dataset splits.
+
+    Uses batched mapping to preprocess multiple examples efficiently.
+    Original text columns are removed from the tokenized dataset
+    because the DataLoader only requires model input features.
+
+    Args:
+        dataset (DatasetDict): Original dataset.
+        tokenizer: FLAN-T5 tokenizer.
+        splits (tuple): Dataset splits to preprocess.
+
+    Returns:
+        dict: Mapping from split names to tokenized datasets.
+    """
 
     tokenized_dataset = {}
 
@@ -122,7 +175,16 @@ def prepare_dataset(dataset, tokenizer, splits=("train", "validation")):
     return tokenized_dataset
 
 def inspect_preprocessing(dataset, tokenizer):
-    """Inspect tokenization results on a small training sample."""
+    """
+    Verify tokenization on three training examples.
+
+    Displays token lengths and decoded text to check instruction
+    formatting, target alignment, and maximum sequence lengths.
+
+    Args:
+        dataset (DatasetDict): Original dataset.
+        tokenizer: FLAN-T5 tokenizer.
+    """
 
     sample = dataset["train"].select(range(3))
 
@@ -158,7 +220,22 @@ def inspect_preprocessing(dataset, tokenizer):
     print("\nPreprocessing inspection completed successfully.")
 
 def create_dataloader(dataset, tokenizer, batch_size=4, shuffle=False):
-    """Create a PyTorch DataLoader with dynamic padding."""
+    """
+    Create a PyTorch DataLoader with dynamic sequence padding.
+
+    Input sequences are padded to the longest input in each batch.
+    Target padding positions are assigned -100 so they are ignored
+    when calculating the model's cross-entropy loss.
+
+    Args:
+        dataset: Tokenized Hugging Face dataset.
+        tokenizer: FLAN-T5 tokenizer.
+        batch_size (int): Number of examples per batch.
+        shuffle (bool): Whether to shuffle examples between epochs.
+
+    Returns:
+        DataLoader: Batched model inputs and labels.
+    """
 
     collator = DataCollatorForSeq2Seq(
         tokenizer=tokenizer,
@@ -206,6 +283,7 @@ def inspect_dataloader(dataset, tokenizer):
     assert batch["input_ids"].shape[1] <= MAX_INPUT_LENGTH
     assert batch["labels"].shape[1] <= MAX_TARGET_LENGTH
 
+    # Count ignored label positions to verify dynamic target padding.
     print(f"Padding tokens in labels: {(batch['labels'] == -100).sum().item()}")
 
     print("\nDataLoader inspection completed successfully.")
