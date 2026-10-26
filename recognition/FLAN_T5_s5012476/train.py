@@ -15,9 +15,14 @@ import random
 import numpy as np
 import torch
 
-from dataset import MODEL_NAME
+from dataset import (
+    MODEL_NAME,
+    load_radiology_dataset,
+    load_tokenizer,
+    preprocess_function,
+    create_dataloader,
+)
 from modules import load_full_model, load_lora_model, inspect_model
-
 
 def parse_args():
     """
@@ -61,7 +66,6 @@ def parse_args():
 
     return parser.parse_args()
 
-
 def set_seed(seed):
     """
     Set random seeds for reproducibility.
@@ -77,7 +81,6 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-
 def get_device():
     """
     Select the available computation device.
@@ -90,7 +93,6 @@ def get_device():
         return torch.device("cuda")
 
     return torch.device("cpu")
-
 
 def initialise_model(args):
     """
@@ -115,6 +117,57 @@ def initialise_model(args):
 
     return model
 
+def initialise_dataloaders(args):
+    """
+    Prepare small training and validation DataLoaders for testing.
+
+    Only a few samples are used at this stage to verify integration
+    without tokenizing the entire dataset.
+
+    Args:
+        args (argparse.Namespace): Training configuration.
+
+    Returns:
+        tuple: Training and validation DataLoaders.
+    """
+
+    # Load the official dataset and FLAN-T5 tokenizer.
+    dataset = load_radiology_dataset()
+    tokenizer = load_tokenizer()
+
+    # Select small subsets for integration testing.
+    train_subset = dataset["train"].select(range(8))
+    val_subset = dataset["validation"].select(range(4))
+
+    # Apply the same preprocessing to both subsets.
+    train_tokenized = train_subset.map(
+        lambda examples: preprocess_function(examples, tokenizer),
+        batched=True,
+        remove_columns=train_subset.column_names,
+    )
+
+    val_tokenized = val_subset.map(
+        lambda examples: preprocess_function(examples, tokenizer),
+        batched=True,
+        remove_columns=val_subset.column_names,
+    )
+
+    # Create batches with dynamic padding and label masking.
+    train_loader = create_dataloader(
+        train_tokenized,
+        tokenizer,
+        batch_size=args.batch_size,
+        shuffle=True,
+    )
+
+    val_loader = create_dataloader(
+        val_tokenized,
+        tokenizer,
+        batch_size=args.batch_size,
+        shuffle=False,
+    )
+
+    return train_loader, val_loader
 
 def main():
     """Initialise the training configuration and selected model."""
@@ -171,6 +224,21 @@ def main():
         model,
         "Full Fine-Tuning" if args.method == "full" else "LoRA Fine-Tuning",
     )
+
+        # Verify that the selected model and data pipeline can be initialised.
+    train_loader, val_loader = initialise_dataloaders(args)
+
+    print("\n=== DataLoader Integration ===")
+    print(f"Training batches: {len(train_loader)}")
+    print(f"Validation batches: {len(val_loader)}")
+
+    # Inspect one training batch before implementing the training loop.
+    batch = next(iter(train_loader))
+
+    for key, value in batch.items():
+        print(f"{key}: {tuple(value.shape)}")
+
+    print("\nModel and DataLoader integration completed successfully.")
 
     print("\nTraining configuration initialised successfully.")
     print("Training loop has not been implemented yet.")

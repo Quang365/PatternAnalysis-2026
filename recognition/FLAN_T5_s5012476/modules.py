@@ -12,7 +12,6 @@ from peft import LoraConfig, TaskType, get_peft_model
 
 from dataset import MODEL_NAME
 
-
 def load_full_model():
     """
     Load FLAN-T5 Base for full fine-tuning.
@@ -29,7 +28,6 @@ def load_full_model():
     model.requires_grad_(True)
 
     return model
-
 
 def load_lora_model(rank=8, alpha=16, dropout=0.05):
     """
@@ -65,7 +63,6 @@ def load_lora_model(rank=8, alpha=16, dropout=0.05):
 
     return model
 
-
 def count_parameters(model):
     """
     Count total and trainable model parameters.
@@ -89,7 +86,6 @@ def count_parameters(model):
     )
 
     return total_parameters, trainable_parameters
-
 
 def inspect_model(model, method):
     """
