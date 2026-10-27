@@ -260,7 +260,14 @@ def inspect_forward_pass(model, dataloader, device):
 
     print("Forward pass completed successfully.")
 
-def train_one_epoch(model, dataloader, optimizer, device, args):
+def train_one_epoch(
+        model, 
+        dataloader, 
+        optimizer, 
+        device, 
+        args,
+        remaining_steps=None,
+        ):
     """
     Train FLAN-T5 for one epoch using a custom PyTorch training loop.
 
@@ -276,6 +283,8 @@ def train_one_epoch(model, dataloader, optimizer, device, args):
         optimizer: PyTorch optimizer.
         device (torch.device): Computation device.
         args (argparse.Namespace): Training configuration.
+        remaining_steps (int | None): Maximum optimizer updates
+            allowed in the current epoch. None means unlimited.
 
     Returns:
         tuple: Average training loss and number of optimizer steps.
@@ -358,10 +367,10 @@ def train_one_epoch(model, dataloader, optimizer, device, args):
                 f"Loss: {loss.item():.4f}"
             )
 
-            # Stop early when running a smoke test.
+            # Stop when the remaining global optimizer-step budget is reached.
             if (
-                args.max_train_steps > 0
-                and optimizer_steps >= args.max_train_steps
+                remaining_steps is not None
+                and optimizer_steps >= remaining_steps
             ):
                 break
 
@@ -504,6 +513,17 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
 
     for epoch in range(args.epochs):
 
+        # Calculate the remaining optimizer-step budget.
+        remaining_steps = None
+
+        if args.max_train_steps > 0:
+            remaining_steps = (
+                args.max_train_steps - total_optimizer_steps
+            )
+
+            if remaining_steps <= 0:
+                break
+
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
 
         _, completed_steps = train_one_epoch(
@@ -512,6 +532,7 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
             optimizer=optimizer,
             device=device,
             args=args,
+            remaining_steps=remaining_steps,
         )
 
         total_optimizer_steps += completed_steps
