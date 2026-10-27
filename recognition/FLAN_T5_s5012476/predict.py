@@ -176,6 +176,13 @@ def parse_args():
         help="Audit exact report overlap between training and validation.",
     )
 
+    parser.add_argument(
+        "--eval_batch_size",
+        type=int,
+        default=8,
+        help="Batch size for evaluation inference.",
+    )
+
     return parser.parse_args()
 
 def load_model_and_tokenizer(method, checkpoint, device):
@@ -400,6 +407,47 @@ def plot_seen_unseen_rouge(grouped_rouge, output_dir):
 
     print(f"Seen/unseen ROUGE figure saved to: {figure_path}")
 
+def generate_batch_summaries(
+    model,
+    tokenizer,
+    reports,
+    device,
+    max_new_tokens=128,
+    num_beams=4,
+):
+    """
+    Generate layman summaries for a batch of radiology reports.
+    """
+    input_texts = [PROMPT + report for report in reports]
+
+    inputs = tokenizer(
+        input_texts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=512,
+    )
+
+    inputs = {
+        key: value.to(device)
+        for key, value in inputs.items()
+    }
+
+    with torch.inference_mode():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            num_beams=num_beams,
+            do_sample=False,
+        )
+
+    summaries = tokenizer.batch_decode(
+        output_ids,
+        skip_special_tokens=True,
+    )
+
+    return summaries
+
 def evaluate_predictions(
     model,
     tokenizer,
@@ -431,33 +479,56 @@ def evaluate_predictions(
     inference_start = time.perf_counter()
     training_reports = get_training_reports()
 
-    for index, example in enumerate(validation_dataset):
-        report = example["radiology_report"]
-        reference = example["layman_report"]
-        split_group = "seen" if report in training_reports else "unseen"
+    total_samples = len(validation_dataset)
 
-        generated_summary = generate_summary(
+    for start_index in range(0, total_samples, args.eval_batch_size):
+        end_index = min(
+            start_index + args.eval_batch_size,
+            total_samples,
+        )
+
+        batch_examples = [
+            validation_dataset[index]
+            for index in range(start_index, end_index)
+        ]
+
+        reports = [
+            example["radiology_report"]
+            for example in batch_examples
+        ]
+
+        generated_summaries = generate_batch_summaries(
             model=model,
             tokenizer=tokenizer,
-            report=report,
+            reports=reports,
             device=device,
             max_new_tokens=args.max_new_tokens,
             num_beams=args.num_beams,
         )
 
-        predictions.append(
-            {
-                "sample_id": index,
-                "source": example["source"],
-                "radiology_report": report,
-                "reference_summary": reference,
-                "generated_summary": generated_summary,
-                "split_group": split_group,
-            }
-        )
+        for index, (example, generated_summary) in enumerate(
+            zip(batch_examples, generated_summaries),
+            start=start_index,
+        ):
+            report = example["radiology_report"]
+
+            predictions.append(
+                {
+                    "sample_id": index,
+                    "source": example["source"],
+                    "split_group": (
+                        "seen"
+                        if report in training_reports
+                        else "unseen"
+                    ),
+                    "radiology_report": report,
+                    "reference_summary": example["layman_report"],
+                    "generated_summary": generated_summary,
+                }
+            )
 
         print(
-            f"Generated {index + 1}/{len(validation_dataset)} summaries"
+            f"Generated {end_index}/{total_samples} summaries"
         )
 
     if device.type == "cuda":
@@ -605,6 +676,9 @@ def main():
 
     if args.num_beams <= 0:
         raise ValueError("num_beams must be positive.")
+
+    if args.eval_batch_size <= 0:
+        raise ValueError("eval_batch_size must be positive.")
 
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
