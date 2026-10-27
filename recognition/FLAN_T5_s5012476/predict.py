@@ -5,13 +5,44 @@ Supports full fine-tuning and LoRA fine-tuning checkpoints.
 """
 
 import argparse
+import csv
+from pathlib import Path
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from peft import PeftModel
 
-from dataset import MODEL_NAME, PROMPT
+from dataset import MODEL_NAME, PROMPT, load_radiology_dataset
 
+def load_evaluation_dataset(max_eval_samples=0):
+    """
+    Load the official validation split for model evaluation.
+
+    Args:
+        max_eval_samples (int): Maximum samples to evaluate.
+            A value of 0 uses the entire validation split.
+
+    Returns:
+        Dataset: Validation dataset.
+    """
+    dataset = load_radiology_dataset()
+    validation_dataset = dataset["validation"]
+
+    if max_eval_samples > 0:
+        sample_count = min(
+            max_eval_samples,
+            len(validation_dataset),
+        )
+
+        validation_dataset = validation_dataset.select(
+            range(sample_count)
+        )
+
+    print("\n=== Evaluation Dataset ===")
+    print(f"Validation samples: {len(validation_dataset):,}")
+    print(f"Columns: {validation_dataset.column_names}")
+
+    return validation_dataset
 
 def parse_args():
     """Parse inference arguments."""
@@ -36,8 +67,8 @@ def parse_args():
     parser.add_argument(
         "--text",
         type=str,
-        required=True,
-        help="Radiology report to summarise.",
+        default=None,
+        help="Radiology report for single prediction.",
     )
 
     parser.add_argument(
@@ -52,8 +83,20 @@ def parse_args():
         default=4,
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Evaluate the model on the validation dataset.",
+    )
 
+    parser.add_argument(
+        "--max_eval_samples",
+        type=int,
+        default=0,
+        help="Maximum evaluation samples; 0 uses the full validation split.",
+    )
+
+    return parser.parse_args()
 
 def load_model_and_tokenizer(method, checkpoint, device):
     """Load the fine-tuned model and its tokenizer."""
@@ -74,7 +117,6 @@ def load_model_and_tokenizer(method, checkpoint, device):
     model.eval()
 
     return model, tokenizer
-
 
 def generate_summary(
     model,
@@ -114,11 +156,94 @@ def generate_summary(
 
     return summary
 
+def evaluate_predictions(
+    model,
+    tokenizer,
+    validation_dataset,
+    device,
+    args,
+):
+    """
+    Generate and save predictions for the validation dataset.
+
+    Args:
+        model: Fine-tuned FLAN-T5 model.
+        tokenizer: FLAN-T5 tokenizer.
+        validation_dataset: Official validation dataset.
+        device (torch.device): Computation device.
+        args (argparse.Namespace): Inference configuration.
+    """
+    output_dir = Path("outputs") / args.method / "evaluation"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    predictions = []
+
+    print("\n=== Generating Evaluation Predictions ===")
+
+    for index, example in enumerate(validation_dataset):
+        report = example["radiology_report"]
+        reference = example["layman_report"]
+
+        generated_summary = generate_summary(
+            model=model,
+            tokenizer=tokenizer,
+            report=report,
+            device=device,
+            max_new_tokens=args.max_new_tokens,
+            num_beams=args.num_beams,
+        )
+
+        predictions.append(
+            {
+                "sample_id": index,
+                "source": example["source"],
+                "radiology_report": report,
+                "reference_summary": reference,
+                "generated_summary": generated_summary,
+            }
+        )
+
+        print(
+            f"Generated {index + 1}/{len(validation_dataset)} summaries"
+        )
+
+    csv_path = output_dir / "predictions.csv"
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=[
+                "sample_id",
+                "source",
+                "radiology_report",
+                "reference_summary",
+                "generated_summary",
+            ],
+        )
+
+        writer.writeheader()
+        writer.writerows(predictions)
+
+    print(f"\nPredictions saved to: {csv_path}")
+
+    return predictions
 
 def main():
     """Run inference from the command line."""
     args = parse_args()
 
+    if args.max_eval_samples < 0:
+        raise ValueError("max_eval_samples must be non-negative.")
+
+    if args.evaluate and args.text is not None:
+        raise ValueError(
+            "Use either --evaluate or --text, not both."
+        )
+
+    if not args.evaluate and not args.text:
+        raise ValueError(
+            "Provide --text for prediction or --evaluate for evaluation."
+        )
     if args.max_new_tokens <= 0:
         raise ValueError("max_new_tokens must be positive.")
 
@@ -139,6 +264,22 @@ def main():
         checkpoint=args.checkpoint,
         device=device,
     )
+
+    if args.evaluate:
+        validation_dataset = load_evaluation_dataset(
+            max_eval_samples=args.max_eval_samples
+        )
+
+        evaluate_predictions(
+            model=model,
+            tokenizer=tokenizer,
+            validation_dataset=validation_dataset,
+            device=device,
+            args=args,
+        )
+
+        print("\nEvaluation predictions completed successfully.")
+        return
 
     summary = generate_summary(
         model=model,
