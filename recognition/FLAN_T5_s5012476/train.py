@@ -16,6 +16,7 @@ import math
 import numpy as np
 import torch
 from torch.optim import AdamW
+from pathlib import Path
 
 from dataset import (
     MODEL_NAME,
@@ -185,7 +186,7 @@ def initialise_dataloaders(args):
         shuffle=False,
     )
 
-    return train_loader, val_loader
+    return train_loader, val_loader, tokenizer
 
 def inspect_forward_pass(model, dataloader, device):
     """
@@ -393,7 +394,52 @@ def validate(model, dataloader, device):
 
     return average_loss
 
-def run_training(model, train_loader, val_loader, device, args):
+def save_checkpoint(model, tokenizer, output_dir, method, epoch, validation_loss):
+    """
+    Save the best model checkpoint and its tokenizer.
+
+    Full fine-tuning saves the complete model.
+    LoRA saves the adapter weights and configuration.
+
+    Args:
+        model: Fine-tuned FLAN-T5 model.
+        tokenizer: FLAN-T5 tokenizer.
+        output_dir (str): Root directory for training outputs.
+        method (str): Fine-tuning method, either 'full' or 'lora'.
+        epoch (int): Current epoch number.
+        validation_loss (float): Current validation loss.
+
+    Returns:
+        Path: Directory containing the saved checkpoint.
+    """
+
+    checkpoint_dir = Path(output_dir) / method / "best_checkpoint"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save model weights and configuration using Hugging Face format.
+    # For PEFT models, this saves the LoRA adapter rather than the full base model.
+    model.save_pretrained(checkpoint_dir)
+
+    # Save the tokenizer needed to reproduce inference.
+    tokenizer.save_pretrained(checkpoint_dir)
+
+    # Record checkpoint metadata for later analysis.
+    metadata = {
+        "method": method,
+        "epoch": epoch,
+        "validation_loss": validation_loss,
+    }
+
+    import json
+
+    with open(checkpoint_dir / "training_metadata.json", "w", encoding="utf-8") as file:
+        json.dump(metadata, file, indent=4)
+
+    print(f"Best checkpoint saved to: {checkpoint_dir}")
+
+    return checkpoint_dir
+
+def run_training(model, tokenizer, train_loader, val_loader, device, args):
     """
     Initialise the optimizer and execute the training loop.
 
@@ -424,6 +470,7 @@ def run_training(model, train_loader, val_loader, device, args):
     print(f"Device: {device}")
 
     total_optimizer_steps = 0
+    best_validation_loss = float("inf")
 
     for epoch in range(args.epochs):
 
@@ -439,12 +486,25 @@ def run_training(model, train_loader, val_loader, device, args):
 
         total_optimizer_steps += completed_steps
 
-                # Evaluate the model after each training epoch.
+        # Evaluate the model after each training epoch.
         validation_loss = validate(
             model=model,
             dataloader=val_loader,
             device=device,
         )
+
+        # Save a checkpoint only when validation loss improves.
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+
+            save_checkpoint(
+                model=model,
+                tokenizer=tokenizer,
+                output_dir=args.output_dir,
+                method=args.method,
+                epoch=epoch + 1,
+                validation_loss=validation_loss,
+            )
 
         print(
             f"\nEpoch {epoch + 1} Summary | "
@@ -517,8 +577,8 @@ def main():
         "Full Fine-Tuning" if args.method == "full" else "LoRA Fine-Tuning",
     )
 
-        # Verify that the selected model and data pipeline can be initialised.
-    train_loader, val_loader = initialise_dataloaders(args)
+    # Verify that the selected model and data pipeline can be initialised.
+    train_loader, val_loader, tokenizer = initialise_dataloaders(args)
 
     print("\n=== DataLoader Integration ===")
     print(f"Training batches: {len(train_loader)}")
@@ -538,6 +598,7 @@ def main():
     # Execute the custom PyTorch training loop.
     run_training(
         model=model,
+        tokenizer=tokenizer,
         train_loader=train_loader,
         val_loader=val_loader,
         device=device,
