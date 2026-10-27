@@ -5,13 +5,12 @@ Supports two fine-tuning methods:
 1. Full fine-tuning
 2. LoRA fine-tuning
 
-This stage implements training configuration and model selection.
-The custom PyTorch training loop will be added in the next stage.
 """
 
 import argparse
 import random
 import math
+import json
 
 import numpy as np
 import torch
@@ -478,6 +477,45 @@ def save_checkpoint(model, tokenizer, output_dir, method, epoch, validation_loss
 
     return checkpoint_dir
 
+def save_training_config(args):
+    """
+    Save the experiment configuration for reproducibility.
+
+    Args:
+        args: Parsed command-line arguments.
+    """
+    output_dir = Path(args.output_dir) / args.method
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = output_dir / "training_config.json"
+
+    config = vars(args).copy()
+    config["model_name"] = "google/flan-t5-base"
+
+    with open(config_path, "w", encoding="utf-8") as file:
+        json.dump(config, file, indent=4)
+
+    print(f"Training configuration saved to: {config_path}")
+
+def save_training_history(history, output_dir, method):
+    """
+    Save training and validation metrics for each epoch.
+
+    Args:
+        history (list): Per-epoch training and validation metrics.
+        output_dir (str): Base output directory.
+        method (str): Fine-tuning method.
+    """
+    experiment_dir = Path(output_dir) / method
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+
+    history_path = experiment_dir / "training_history.json"
+
+    with open(history_path, "w", encoding="utf-8") as file:
+        json.dump(history, file, indent=4)
+
+    print(f"Training history saved to: {history_path}")
+
 def run_training(model, tokenizer, train_loader, val_loader, device, args):
     """
     Initialise the optimizer and execute the training loop.
@@ -510,6 +548,7 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
 
     total_optimizer_steps = 0
     best_validation_loss = float("inf")
+    history = []
 
     for epoch in range(args.epochs):
 
@@ -526,7 +565,7 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
 
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
 
-        _, completed_steps = train_one_epoch(
+        training_loss, completed_steps = train_one_epoch(
             model=model,
             dataloader=train_loader,
             optimizer=optimizer,
@@ -542,6 +581,22 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
             model=model,
             dataloader=val_loader,
             device=device,
+        )
+
+        epoch_metrics = {
+            "epoch": epoch + 1,
+            "training_loss": training_loss,
+            "validation_loss": validation_loss,
+            "optimizer_steps": completed_steps,
+            "cumulative_optimizer_steps": total_optimizer_steps,
+        }
+
+        history.append(epoch_metrics)
+
+        save_training_history(
+            history=history,
+            output_dir=args.output_dir,
+            method=args.method,
         )
 
         # Save a checkpoint only when validation loss improves.
@@ -651,6 +706,8 @@ def main():
 
     # Verify that the model can calculate loss from a tokenized batch.
     inspect_forward_pass(model, train_loader, device)
+
+    save_training_config(args)
 
     # Execute the custom PyTorch training loop.
     run_training(
