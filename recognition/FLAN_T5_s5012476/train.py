@@ -15,6 +15,7 @@ import time
 import numpy as np
 import torch
 from torch.optim import AdamW
+from tqdm.auto import tqdm
 
 from dataset import (
     MODEL_NAME,
@@ -102,6 +103,11 @@ def parse_args():
         type=int,
         default=0,
         help="Maximum validation samples; 0 uses the full validation split.",
+    )
+
+    parser.add_argument(
+        "--verbose", action="store_true",
+        help="Run additional DataLoader and forward-pass diagnostics.",
     )
 
     return parser.parse_args()
@@ -305,9 +311,20 @@ def train_one_epoch(
     accumulation_steps = args.gradient_accumulation_steps
     num_batches = len(dataloader)
 
-    print("\n=== Training Epoch ===")
+    # Show one progress bar per epoch instead of printing every optimizer step.
+    max_batches = num_batches
+    if remaining_steps is not None:
+        max_batches = min(num_batches, remaining_steps * accumulation_steps)
 
-    for batch_index, batch in enumerate(dataloader):
+    progress = tqdm(
+        enumerate(dataloader),
+        total=max_batches,
+        desc="Training",
+        unit="batch",
+        leave=False,
+    )
+
+    for batch_index, batch in progress:
 
         # Transfer the current batch to the computation device.
         batch = {
@@ -366,10 +383,9 @@ def train_one_epoch(
 
             optimizer_steps += 1
 
-            print(
-                f"Optimizer step {optimizer_steps} | "
-                f"Batch {batch_index + 1}/{num_batches} | "
-                f"Loss: {loss.item():.4f}"
+            progress.set_postfix(
+                loss=f"{total_loss / total_batches:.4f}",
+                steps=optimizer_steps,
             )
 
             # Stop when the remaining global optimizer-step budget is reached.
@@ -379,6 +395,7 @@ def train_one_epoch(
             ):
                 break
 
+    progress.close()
     average_loss = total_loss / total_batches
 
     print(f"\nAverage training loss: {average_loss:.4f}")
@@ -675,16 +692,14 @@ def main():
     print(f"Training batches: {len(train_loader)}")
     print(f"Validation batches: {len(val_loader)}")
 
-    # Inspect one training batch before implementing the training loop.
-    batch = next(iter(train_loader))
-
-    for key, value in batch.items():
-        print(f"{key}: {tuple(value.shape)}")
+    # Additional diagnostics are optional to avoid unnecessary computation.
+    if args.verbose:
+        batch = next(iter(train_loader))
+        for key, value in batch.items():
+            print(f"{key}: {tuple(value.shape)}")
+        inspect_forward_pass(model, train_loader, device)
 
     print("\nModel and DataLoader integration completed successfully.")
-
-    # Verify that the model can calculate loss from a tokenized batch.
-    inspect_forward_pass(model, train_loader, device)
 
     save_training_config(args)
 
@@ -698,7 +713,7 @@ def main():
         args=args,
     )
 
-    print("\nTraining configuration initialised successfully.")
+
 
 if __name__ == "__main__":
     main()
