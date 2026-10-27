@@ -7,6 +7,7 @@ Supports full fine-tuning and LoRA fine-tuning checkpoints.
 import argparse
 import csv
 import json
+import time
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -263,6 +264,12 @@ def evaluate_predictions(
 
     print("\n=== Generating Evaluation Predictions ===")
 
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+
+    inference_start = time.perf_counter()
+
     for index, example in enumerate(validation_dataset):
         report = example["radiology_report"]
         reference = example["layman_report"]
@@ -289,6 +296,22 @@ def evaluate_predictions(
         print(
             f"Generated {index + 1}/{len(validation_dataset)} summaries"
         )
+
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+    total_inference_time = time.perf_counter() - inference_start
+
+    num_samples = len(predictions)
+
+    average_latency = total_inference_time / num_samples
+    throughput = num_samples / total_inference_time
+
+    peak_gpu_memory = (
+        torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+        if device.type == "cuda"
+        else None
+    )
 
     csv_path = output_dir / "predictions.csv"
 
@@ -337,6 +360,34 @@ def evaluate_predictions(
         output_dir=output_dir,
         method=args.method,
     )
+
+    inference_metrics = {
+        "method": args.method,
+        "checkpoint": args.checkpoint,
+        "device": str(device),
+        "num_samples": num_samples,
+        "total_inference_seconds": total_inference_time,
+        "average_latency_seconds": average_latency,
+        "throughput_samples_per_second": throughput,
+        "peak_gpu_memory_gb": peak_gpu_memory,
+    }
+
+    metrics_path = output_dir / "inference_metrics.json"
+
+    with open(metrics_path, "w", encoding="utf-8") as file:
+        json.dump(inference_metrics, file, indent=4)
+
+    print("\n=== Inference Performance ===")
+    print(f"Total inference time: {total_inference_time:.2f} seconds")
+    print(f"Average latency: {average_latency:.4f} seconds/sample")
+    print(f"Throughput: {throughput:.4f} samples/second")
+
+    if peak_gpu_memory is not None:
+        print(f"Peak GPU memory: {peak_gpu_memory:.3f} GB")
+    else:
+        print("Peak GPU memory: N/A (CPU execution)")
+
+    print(f"Inference metrics saved to: {metrics_path}")
 
     return predictions
 
