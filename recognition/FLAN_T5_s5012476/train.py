@@ -11,8 +11,10 @@ import argparse
 import random
 import math
 import json
+import time
 
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from torch.optim import AdamW
 from pathlib import Path
@@ -516,6 +518,70 @@ def save_training_history(history, output_dir, method):
 
     print(f"Training history saved to: {history_path}")
 
+def save_training_summary(summary, output_dir, method):
+    """
+    Save final training metrics and performance statistics.
+    """
+    experiment_dir = Path(output_dir) / method
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path = experiment_dir / "training_summary.json"
+
+    with open(summary_path, "w", encoding="utf-8") as file:
+        json.dump(summary, file, indent=4)
+
+    print(f"Training summary saved to: {summary_path}")
+
+def plot_training_history(history, output_dir, method):
+    """
+    Plot and save training and validation loss curves.
+
+    Args:
+        history (list): Per-epoch training metrics.
+        output_dir (str): Base output directory.
+        method (str): Fine-tuning method.
+    """
+    if not history:
+        print("No training history available for plotting.")
+        return
+
+    experiment_dir = Path(output_dir) / method
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+
+    epochs = [item["epoch"] for item in history]
+    training_losses = [item["training_loss"] for item in history]
+    validation_losses = [item["validation_loss"] for item in history]
+
+    plt.figure(figsize=(8, 5))
+
+    plt.plot(
+        epochs,
+        training_losses,
+        marker="o",
+        label="Training Loss",
+    )
+
+    plt.plot(
+        epochs,
+        validation_losses,
+        marker="s",
+        label="Validation Loss",
+    )
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title(f"FLAN-T5 {method.upper()} Training History")
+    plt.xticks(epochs)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    figure_path = experiment_dir / "loss_curve.png"
+    plt.savefig(figure_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print(f"Loss curve saved to: {figure_path}")
+    
 def run_training(model, tokenizer, train_loader, val_loader, device, args):
     """
     Initialise the optimizer and execute the training loop.
@@ -549,6 +615,13 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
     total_optimizer_steps = 0
     best_validation_loss = float("inf")
     history = []
+
+    # Start measuring training runtime.
+    training_start_time = time.perf_counter()
+
+    # Reset peak GPU memory statistics before training.
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     for epoch in range(args.epochs):
 
@@ -623,6 +696,51 @@ def run_training(model, tokenizer, train_loader, val_loader, device, args):
             and total_optimizer_steps >= args.max_train_steps
         ):
             break
+
+    # Measure total training runtime.
+    training_runtime = time.perf_counter() - training_start_time
+
+    # Record peak GPU memory usage.
+    peak_gpu_memory_gb = None
+
+    if device.type == "cuda":
+        peak_gpu_memory_gb = (
+            torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+        )
+
+    print("\n=== Training Performance ===")
+    print(f"Training runtime: {training_runtime:.2f} seconds")
+
+    if peak_gpu_memory_gb is not None:
+        print(f"Peak GPU memory: {peak_gpu_memory_gb:.2f} GB")
+    else:
+        print("Peak GPU memory: N/A (CPU execution)")
+
+    summary = {
+        "method": args.method,
+        "device": str(device),
+        "epochs_completed": len(history),
+        "total_optimizer_steps": total_optimizer_steps,
+        "best_validation_loss": best_validation_loss,
+        "best_epoch": min(
+            history,
+            key=lambda item: item["validation_loss"]
+        )["epoch"],
+        "training_runtime_seconds": training_runtime,
+        "peak_gpu_memory_gb": peak_gpu_memory_gb,
+    }
+
+    save_training_summary(
+        summary=summary,
+        output_dir=args.output_dir,
+        method=args.method,
+    )
+
+    plot_training_history(
+        history=history,
+        output_dir=args.output_dir,
+        method=args.method,
+    )
 
     print("\nTraining completed successfully.")
     print(f"Total optimizer steps: {total_optimizer_steps}")
