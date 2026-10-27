@@ -6,11 +6,15 @@ Supports full fine-tuning and LoRA fine-tuning checkpoints.
 
 import argparse
 import csv
-from pathlib import Path
+import json
 
+import numpy as np
+import matplotlib.pyplot as plt
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from peft import PeftModel
+from rouge_score import rouge_scorer
+from pathlib import Path
 
 from dataset import MODEL_NAME, PROMPT, load_radiology_dataset
 
@@ -156,6 +160,85 @@ def generate_summary(
 
     return summary
 
+def calculate_rouge(predictions):
+    """
+    Calculate average ROUGE F1 scores across evaluation samples.
+
+    Args:
+        predictions (list): Generated predictions and references.
+
+    Returns:
+        dict: Average ROUGE scores.
+    """
+    scorer = rouge_scorer.RougeScorer(
+        ["rouge1", "rouge2", "rougeL", "rougeLsum"],
+        use_stemmer=True,
+    )
+
+    scores = {
+        "rouge1": [],
+        "rouge2": [],
+        "rougeL": [],
+        "rougeLsum": [],
+    }
+
+    for prediction in predictions:
+        reference = prediction["reference_summary"]
+        generated = prediction["generated_summary"]
+
+        result = scorer.score(reference, generated)
+
+        for metric in scores:
+            scores[metric].append(result[metric].fmeasure)
+
+    return {
+        metric: float(np.mean(values))
+        for metric, values in scores.items()
+    }
+
+def plot_rouge_scores(rouge_scores, output_dir, method):
+    """
+    Generate a bar chart of ROUGE F1 scores.
+
+    Args:
+        rouge_scores (dict): ROUGE evaluation results.
+        output_dir (Path): Directory for evaluation outputs.
+        method (str): Fine-tuning method.
+    """
+    metrics = ["rouge1", "rouge2", "rougeL", "rougeLsum"]
+    labels = ["ROUGE-1", "ROUGE-2", "ROUGE-L", "ROUGE-Lsum"]
+
+    values = [rouge_scores[metric] for metric in metrics]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    bars = ax.bar(labels, values)
+
+    ax.set_title(f"{method.upper()} — ROUGE Evaluation")
+    ax.set_ylabel("ROUGE F1 Score")
+    ax.set_ylim(0, 1)
+
+    for bar, value in zip(bars, values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.01,
+            f"{value:.4f}",
+            ha="center",
+            va="bottom",
+        )
+
+    ax.grid(axis="y", alpha=0.25)
+    ax.set_axisbelow(True)
+
+    plt.tight_layout()
+
+    figure_path = output_dir / "rouge_scores.png"
+
+    plt.savefig(figure_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"ROUGE figure saved to: {figure_path}")
+
 def evaluate_predictions(
     model,
     tokenizer,
@@ -225,6 +308,35 @@ def evaluate_predictions(
         writer.writerows(predictions)
 
     print(f"\nPredictions saved to: {csv_path}")
+
+    # Calculate ROUGE scores for the generated summaries.
+    rouge_scores = calculate_rouge(predictions)
+
+    rouge_path = output_dir / "rouge_scores.json"
+
+    with open(rouge_path, "w", encoding="utf-8") as file:
+        json.dump(
+            {
+                "method": args.method,
+                "num_samples": len(predictions),
+                "scores": rouge_scores,
+            },
+            file,
+            indent=4,
+        )
+
+    print("\n=== ROUGE Evaluation ===")
+
+    for metric, score in rouge_scores.items():
+        print(f"{metric}: {score:.4f}")
+
+    print(f"ROUGE scores saved to: {rouge_path}")
+
+    plot_rouge_scores(
+        rouge_scores=rouge_scores,
+        output_dir=output_dir,
+        method=args.method,
+    )
 
     return predictions
 
