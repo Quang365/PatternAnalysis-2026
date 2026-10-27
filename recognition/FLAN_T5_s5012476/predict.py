@@ -183,6 +183,14 @@ def parse_args():
         help="Batch size for evaluation inference.",
     )
 
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="smoke",
+        choices=["smoke", "final"],
+        help="Experiment category for evaluation outputs.",
+    )
+
     return parser.parse_args()
 
 def load_model_and_tokenizer(method, checkpoint, device):
@@ -465,8 +473,32 @@ def evaluate_predictions(
         device (torch.device): Computation device.
         args (argparse.Namespace): Inference configuration.
     """
-    output_dir = Path("outputs") / args.method / "evaluation"
+    output_dir = (
+        Path("outputs")
+        / args.run_name
+        / args.method
+        / "evaluation"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    evaluation_config = {
+        "method": args.method,
+        "run_name": args.run_name,
+        "checkpoint": str(args.checkpoint),
+        "evaluation_split": "validation",
+        "num_samples": len(validation_dataset),
+        "eval_batch_size": args.eval_batch_size,
+        "max_new_tokens": args.max_new_tokens,
+        "num_beams": args.num_beams,
+        "device": str(device),
+    }
+
+    config_path = output_dir / "evaluation_config.json"
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(evaluation_config, f, indent=4)
+
+    print(f"Evaluation configuration saved to: {config_path}")
 
     predictions = []
 
