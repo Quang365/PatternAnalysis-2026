@@ -83,6 +83,22 @@ def parse_args():
         default=1.0,
     )
 
+    # Optional dataset limits for smoke testing.
+    # A value of 0 means using the entire split.
+    parser.add_argument(
+        "--max_train_samples",
+        type=int,
+        default=0,
+        help="Maximum training samples; 0 uses the full training split.",
+    )
+
+    parser.add_argument(
+        "--max_val_samples",
+        type=int,
+        default=0,
+        help="Maximum validation samples; 0 uses the full validation split.",
+    )
+
     return parser.parse_args()
 
 def set_seed(seed):
@@ -154,9 +170,23 @@ def initialise_dataloaders(args):
     dataset = load_radiology_dataset()
     tokenizer = load_tokenizer()
 
-    # Select small subsets for integration testing.
-    train_subset = dataset["train"].select(range(8))
-    val_subset = dataset["validation"].select(range(4))
+    # Use the full official splits unless sample limits are specified.
+    train_subset = dataset["train"]
+    val_subset = dataset["validation"]
+
+    if args.max_train_samples > 0:
+        train_subset = train_subset.select(
+            range(min(args.max_train_samples, len(train_subset)))
+        )
+
+    if args.max_val_samples > 0:
+        val_subset = val_subset.select(
+            range(min(args.max_val_samples, len(val_subset)))
+        )
+
+    print("\n=== Dataset Configuration ===")
+    print(f"Training samples: {len(train_subset):,}")
+    print(f"Validation samples: {len(val_subset):,}")
 
     # Apply the same preprocessing to both subsets.
     train_tokenized = train_subset.map(
@@ -547,6 +577,12 @@ def main():
 
     if not 0 <= args.lora_dropout < 1:
         raise ValueError("lora_dropout must be in [0, 1)")
+
+    if args.max_train_samples < 0:
+        raise ValueError("max_train_samples must be non-negative")
+
+    if args.max_val_samples < 0:
+        raise ValueError("max_val_samples must be non-negative")
 
     # Use method-specific initial learning rates.
     # These are starting configurations, not tuned values.
