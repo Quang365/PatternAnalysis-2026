@@ -1,10 +1,14 @@
 """Dataset loading and inspection for radiology report summarisation."""
 
+import logging
+
+from utils import setup_logging
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers import DataCollatorForSeq2Seq
 
+logger = logging.getLogger(__name__)
 
 DATASET_NAME = "BioLaySumm/BioLaySumm2025-LaymanRRG-opensource-track"
 
@@ -57,27 +61,15 @@ def load_tokenizer():
     return AutoTokenizer.from_pretrained(MODEL_NAME)
 
 def inspect_dataset(dataset):
-    """
-    Validate the dataset structure and inspect sample records.
+    """Validate dataset structure and inspect sample records."""
 
-    Checks that all official splits exist, their sample counts match
-    expectations, and the required columns are available.
-
-    Args:
-        dataset (DatasetDict): Loaded BioLaySumm dataset.
-    """
-
-    print("\n=== Dataset Inspection ===")
+    logger.info("Inspecting dataset structure")
 
     for split, expected_size in EXPECTED_SPLITS.items():
         if split not in dataset:
             raise ValueError(f"Missing dataset split: {split}")
 
         split_data = dataset[split]
-
-        print(f"\nSplit: {split}")
-        print(f"Samples: {len(split_data):,}")
-        print(f"Columns: {split_data.column_names}")
 
         if len(split_data) != expected_size:
             raise ValueError(
@@ -92,16 +84,23 @@ def inspect_dataset(dataset):
                 f"Missing columns in {split}: {missing_columns}"
             )
 
+        logger.info("%s: %s samples", split, f"{len(split_data):,}")
+        logger.debug("Columns: %s", split_data.column_names)
+
         if len(split_data) > 0:
             sample = split_data[0]
 
-            print("Sample radiology report:")
-            print(str(sample["radiology_report"])[:300])
+            logger.debug(
+                "Sample radiology report: %s",
+                str(sample["radiology_report"])[:300],
+            )
 
-            print("\nSample layperson summary:")
-            print(str(sample["layman_report"])[:300])
+            logger.debug(
+                "Sample layperson summary: %s",
+                str(sample["layman_report"])[:300],
+            )
 
-    print("\nDataset inspection completed successfully.")
+    logger.info("Dataset inspection completed")
 
 def preprocess_function(examples, tokenizer):
     """
@@ -175,16 +174,7 @@ def prepare_dataset(dataset, tokenizer, splits=("train", "validation")):
     return tokenized_dataset
 
 def inspect_preprocessing(dataset, tokenizer):
-    """
-    Verify tokenization on three training examples.
-
-    Displays token lengths and decoded text to check instruction
-    formatting, target alignment, and maximum sequence lengths.
-
-    Args:
-        dataset (DatasetDict): Original dataset.
-        tokenizer: FLAN-T5 tokenizer.
-    """
+    """Verify tokenization on three training examples."""
 
     sample = dataset["train"].select(range(3))
 
@@ -193,31 +183,39 @@ def inspect_preprocessing(dataset, tokenizer):
         "layman_report": list(sample["layman_report"]),
     }
 
-    tokenized = preprocess_function(
-        examples,
-        tokenizer,
-    )
-
-    print("\n=== Preprocessing Inspection ===")
+    tokenized = preprocess_function(examples, tokenizer)
 
     for i in range(len(sample)):
         input_ids = tokenized["input_ids"][i]
         label_ids = tokenized["labels"][i]
 
-        print(f"\nSample {i + 1}")
-        print(f"Input tokens: {len(input_ids)}")
-        print(f"Target tokens: {len(label_ids)}")
-
-        print("\nDecoded input:")
-        print(tokenizer.decode(input_ids, skip_special_tokens=True)[:400])
-
-        print("\nDecoded target:")
-        print(tokenizer.decode(label_ids, skip_special_tokens=True)[:400])
-
         assert len(input_ids) <= MAX_INPUT_LENGTH
         assert len(label_ids) <= MAX_TARGET_LENGTH
 
-    print("\nPreprocessing inspection completed successfully.")
+        logger.debug(
+            "Sample %d | Input tokens: %d | Target tokens: %d",
+            i + 1,
+            len(input_ids),
+            len(label_ids),
+        )
+
+        logger.debug(
+            "Decoded input: %s",
+            tokenizer.decode(
+                input_ids,
+                skip_special_tokens=True,
+            )[:400],
+        )
+
+        logger.debug(
+            "Decoded target: %s",
+            tokenizer.decode(
+                label_ids,
+                skip_special_tokens=True,
+            )[:400],
+        )
+
+    logger.info("Preprocessing inspection completed")
 
 def create_dataloader(dataset, tokenizer, batch_size=4, shuffle=False):
     """
@@ -271,11 +269,6 @@ def inspect_dataloader(dataset, tokenizer):
 
     batch = next(iter(dataloader))
 
-    print("\n=== DataLoader Inspection ===")
-
-    for key, value in batch.items():
-        print(f"{key}: {tuple(value.shape)}")
-
     assert batch["input_ids"].shape[0] == 4
     assert batch["attention_mask"].shape == batch["input_ids"].shape
     assert batch["labels"].shape[0] == 4
@@ -283,18 +276,22 @@ def inspect_dataloader(dataset, tokenizer):
     assert batch["input_ids"].shape[1] <= MAX_INPUT_LENGTH
     assert batch["labels"].shape[1] <= MAX_TARGET_LENGTH
 
-    # Count ignored label positions to verify dynamic target padding.
-    print(f"Padding tokens in labels: {(batch['labels'] == -100).sum().item()}")
+    for key, value in batch.items():
+        logger.debug("%s shape: %s", key, tuple(value.shape))
 
-    print("\nDataLoader inspection completed successfully.")
+    logger.debug(
+        "Ignored label padding tokens: %d",
+        (batch["labels"] == -100).sum().item(),
+    )
+
+    logger.info("DataLoader inspection completed")
 
 if __name__ == "__main__":
-    dataset = load_radiology_dataset()
+    setup_logging()
 
+    dataset = load_radiology_dataset()
     inspect_dataset(dataset)
 
     tokenizer = load_tokenizer()
-
     inspect_preprocessing(dataset, tokenizer)
-
     inspect_dataloader(dataset, tokenizer)

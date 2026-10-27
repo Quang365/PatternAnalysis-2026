@@ -6,11 +6,15 @@ Supports two fine-tuning approaches:
 2. LoRA fine-tuning: freeze the pretrained model and train
    low-rank adapters attached to attention projections.
 """
+import logging
 
+from utils import setup_logging
 from transformers import AutoModelForSeq2SeqLM
 from peft import LoraConfig, TaskType, get_peft_model
 
 from dataset import MODEL_NAME
+
+logger = logging.getLogger(__name__)
 
 def load_full_model():
     """
@@ -88,49 +92,38 @@ def count_parameters(model):
     return total_parameters, trainable_parameters
 
 def inspect_model(model, method):
-    """
-    Display model parameter statistics.
-
-    Args:
-        model: Initialised FLAN-T5 model.
-        method (str): Name of the fine-tuning method.
-    """
+    """Log model parameter statistics."""
 
     total, trainable = count_parameters(model)
-
     percentage = 100 * trainable / total
 
-    print(f"\n=== {method} Model Inspection ===")
-    print(f"Total parameters: {total:,}")
-    print(f"Trainable parameters: {trainable:,}")
-    print(f"Frozen parameters: {total - trainable:,}")
-    print(f"Trainable percentage: {percentage:.4f}%")
+    logger.info("%s Model", method)
+    logger.info("Total parameters: %s", f"{total:,}")
+    logger.info("Trainable parameters: %s", f"{trainable:,}")
+    logger.debug("Frozen parameters: %s", f"{total - trainable:,}")
+    logger.info("Trainable percentage: %.4f%%", percentage)
 
     return total, trainable
 
-
 if __name__ == "__main__":
+    setup_logging()
 
-    # Load and inspect the fully trainable FLAN-T5 model.
     full_model = load_full_model()
     full_total, full_trainable = inspect_model(
         full_model,
         "Full Fine-Tuning",
     )
 
-    # Release the first model before loading another copy.
     del full_model
 
-    # Load and inspect the LoRA-adapted FLAN-T5 model.
     lora_model = load_lora_model()
     lora_total, lora_trainable = inspect_model(
         lora_model,
         "LoRA Fine-Tuning",
     )
 
-    # Verify the expected parameter-freezing behaviour.
     assert full_total == full_trainable
     assert lora_trainable < lora_total
     assert lora_trainable > 0
 
-    print("\nModel initialisation completed successfully.")
+    logger.info("Model initialisation completed successfully")
