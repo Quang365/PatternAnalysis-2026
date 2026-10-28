@@ -1,0 +1,23 @@
+[
+    {
+        "epoch": 1,
+        "training_loss": 1.3129415718159456,
+        "validation_loss": 0.9055706892669201,
+        "optimizer_steps": 9404,
+        "cumulative_optimizer_steps": 9404
+    },
+    {
+        "epoch": 2,
+        "training_loss": 1.0566605183318636,
+        "validation_loss": 0.8112345265567302,
+        "optimizer_steps": 9404,
+        "cumulative_optimizer_steps": 18808
+    },
+    {
+        "epoch": 3,
+        "training_loss": 0.9766167531094717,
+        "validation_loss": 0.7654173265874386,
+        "optimizer_steps": 9404,
+        "cumulative_optimizer_steps": 28212
+    }
+]

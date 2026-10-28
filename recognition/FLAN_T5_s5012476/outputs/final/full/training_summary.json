@@ -1,0 +1,10 @@
+{
+    "method": "full",
+    "device": "cuda",
+    "epochs_completed": 3,
+    "total_optimizer_steps": 28212,
+    "best_validation_loss": 0.4667844432264566,
+    "best_epoch": 3,
+    "training_runtime_seconds": 11635.575955830514,
+    "peak_gpu_memory_gb": 7.8179779052734375
+}

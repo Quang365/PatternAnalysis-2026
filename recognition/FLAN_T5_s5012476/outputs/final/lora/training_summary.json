@@ -1,0 +1,10 @@
+{
+    "method": "lora",
+    "device": "cuda",
+    "epochs_completed": 3,
+    "total_optimizer_steps": 28212,
+    "best_validation_loss": 0.7654173265874386,
+    "best_epoch": 3,
+    "training_runtime_seconds": 12846.280245274305,
+    "peak_gpu_memory_gb": 4.678746223449707
+}
