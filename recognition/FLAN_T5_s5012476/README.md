@@ -33,33 +33,33 @@
 10. [AI Usage Disclosure](#10-ai-usage-disclosure)
 
 ## 1. Introduction
+
 ### 1.1 Background and Problem
 
-Radiology reports contain essential diagnostic information but often use specialised medical terminology that is difficult for patients to understand. Generating patient-friendly summaries can improve accessibility; however, clinical accuracy remains critical, as hallucinated findings or omitted information may lead to misinterpretation.
+Radiology reports contain essential diagnostic information but often use specialised terminology that patients may struggle to understand. Generating patient-friendly summaries can improve accessibility, but clinical accuracy remains critical: hallucinated findings, omitted information, or altered diagnostic certainty may lead to misinterpretation [7].
 
-This project investigates **FLAN-T5 Base** for radiology report summarisation using the **BioLaySumm** dataset. It compares **Full Fine-Tuning (Full FT)** and **Low-Rank Adaptation (LoRA)** to evaluate the trade-offs between summarisation quality, computational efficiency, and clinical reliability.
+This project investigates **FLAN-T5 Base** for radiology report summarisation using the **BioLaySumm2025 LaymanRRG** dataset [1]. Building on previous T5-based approaches to radiology summarisation [6], it compares **Full Fine-Tuning (Full FT)** and **Low-Rank Adaptation (LoRA)** in terms of summarisation quality, computational efficiency, and clinical reliability.
 
 ### 1.2 Objectives and Research Question
 
-This project investigates whether **Low-Rank Adaptation (LoRA)** can achieve summarisation quality comparable to **Full Fine-Tuning (Full FT)** while reducing computational costs, and how both approaches perform in terms of clinical reliability.
+**Research question:** Can LoRA achieve summarisation quality comparable to Full FT with substantially fewer trainable parameters, while maintaining clinical reliability?
 
-To address this research question, the project aims to:
+The project aims to:
 
-1. Fine-tune **FLAN-T5 Base** using Full FT and LoRA on the BioLaySumm dataset.
-2. Compare summarisation performance against a **zero-shot baseline** using ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum.
-3. Evaluate computational efficiency through trainable parameters, GPU memory usage, training time, and inference throughput.
-4. Investigate dataset overlap and its impact on evaluation reliability.
-5. Analyse clinical safety by examining hallucinations, information omissions, and readability.
+1. Compare **zero-shot, LoRA, and Full FT** using ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum.
+2. Measure computational efficiency through trainable parameters, GPU memory usage, training time, and inference performance.
+3. Investigate training–validation data overlap and its impact on evaluation reliability.
+4. Analyse clinical safety through hallucinations, omissions, and readability.
 
 ### 1.3 Proposed Approach
 
-This project adopts **FLAN-T5 Base**, an instruction-tuned encoder-decoder Transformer, to generate patient-friendly summaries from radiology reports. Three approaches are considered:
+The project uses **FLAN-T5 Base**, an instruction-tuned encoder-decoder Transformer [2, 3], with three configurations:
 
-- **Zero-shot:** Uses the pretrained FLAN-T5 model without task-specific fine-tuning.
-- **Full Fine-Tuning (Full FT):** Updates all model parameters using the radiology summarisation dataset.
-- **Low-Rank Adaptation (LoRA):** Fine-tunes lightweight adapter parameters while keeping the pretrained model weights frozen.
+- **Zero-shot:** Pretrained model without task-specific training.
+- **Full FT:** Updates all pretrained model parameters.
+- **LoRA:** Trains lightweight low-rank adapters while keeping pretrained weights frozen [4].
 
-The models are evaluated using **ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum**, alongside computational efficiency metrics. Clinical safety is examined through qualitative analysis of generated summaries, focusing on hallucinations, omissions, and readability.
+All configurations follow a consistent preprocessing and evaluation pipeline. Summarisation quality is assessed using ROUGE [5], while computational profiling and qualitative clinical safety analysis provide complementary evidence beyond lexical similarity.
 
 The overall workflow is illustrated in Figure 1.
 
@@ -68,7 +68,7 @@ The overall workflow is illustrated in Figure 1.
 </p>
 
 <p align="center">
-  <em>Figure 1. Overview of the FLAN-T5 radiology report summarisation pipeline, comparing zero-shot inference, full fine-tuning, and LoRA.</em>
+  <em>Figure 1. Overview of the FLAN-T5 radiology report summarisation pipeline, comparing zero-shot inference, Full FT, and LoRA.</em>
 </p>
 
 ## 2. Feasibility Review
@@ -150,8 +150,10 @@ A case-insensitive, whitespace-normalised exact-match audit was conducted to det
 **45.06% of validation records contain reports also present in training**, potentially inflating evaluation scores. Furthermore, 12,154 unique training reports have multiple distinct reference summaries, introducing ambiguity in the training targets.
 
 ![Training–Validation Dataset Overlap](figures/dataset_overlap.png)
+<p align="center">
+  <em>Figure 2. Distribution of overlapping (45.06%) and unseen (54.94%) validation reports.</em>
+</p>
 
-*Figure 2. Distribution of overlapping (45.06%) and unseen (54.94%) validation reports.*
 
 To assess the impact of overlap, ROUGE is evaluated on both the **full validation set (10,000 records)** and the **unseen-report subset (5,494 records)**. This comparison helps distinguish performance on previously encountered report text from generalisation to unseen reports.
 
@@ -247,5 +249,11 @@ Both configurations showed decreasing training and validation losses over three 
 [4] Hu et al. (2022). *LoRA: Low-Rank Adaptation of Large Language Models*. International Conference on Learning Representations (ICLR).
 
 [5] Lin (2004). *ROUGE: A Package for Automatic Evaluation of Summaries*. Text Summarization Branches Out, Association for Computational Linguistics (ACL).
+
+[6] Zhang et al. (2025). *AEHRC at BioLaySumm 2025: Leveraging T5 for Lay Summarisation of Radiology Reports*. Proceedings of the 24th Workshop on Biomedical Language Processing (Shared Tasks), ACL, pp. 171–178.
+
+[7] Jeblick et al. (2024). *ChatGPT Makes Medicine Easy to Swallow: An Exploratory Case Study on Simplified Radiology Reports*. European Radiology, 34, pp. 2817–2825.
+
+[8] Zhao et al. (2026). *X-ray Made Simple: Lay Radiology Report Generation and Robust Evaluation*. Findings of ACL 2026, pp. 34583–34598.
 
 ## 10. AI Usage Disclosure

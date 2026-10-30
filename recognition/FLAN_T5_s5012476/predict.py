@@ -21,6 +21,7 @@ from evaluation import (
     calculate_rouge,
     plot_rouge_scores,
     get_training_reports,
+    normalize_report,
     calculate_grouped_rouge,
     plot_seen_unseen_rouge,
 )
@@ -67,14 +68,14 @@ def parse_args():
         "--method",
         type=str,
         required=True,
-        choices=["full", "lora"],
+        choices=["zero_shot", "full", "lora"],
     )
 
     parser.add_argument(
         "--checkpoint",
         type=str,
-        required=True,
-        help="Path to the fine-tuned checkpoint.",
+        required=None,
+        help="Path to the fine-tuned checkpoint (required for full/lora).",
     )
 
     parser.add_argument(
@@ -133,13 +134,18 @@ def parse_args():
     return parser.parse_args()
 
 def load_model_and_tokenizer(method, checkpoint, device):
-    """Load the fine-tuned model and its tokenizer."""
-    tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+    """Load the selected model and its tokenizer."""
 
-    if method == "full":
+    if method == "zero_shot":
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+
+    elif method == "full":
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint)
         model = AutoModelForSeq2SeqLM.from_pretrained(checkpoint)
 
     else:
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint)
         base_model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
         model = PeftModel.from_pretrained(
@@ -189,11 +195,6 @@ def generate_summary(
     )
 
     return summary
-
-
-
-
-
 
 def generate_batch_summaries(
     model,
@@ -288,8 +289,8 @@ def evaluate_predictions(
         torch.cuda.reset_peak_memory_stats(device)
         torch.cuda.synchronize(device)
 
-    inference_start = time.perf_counter()
     training_reports = get_training_reports()
+    inference_start = time.perf_counter()
 
     total_samples = len(validation_dataset)
 
@@ -330,7 +331,7 @@ def evaluate_predictions(
                     "source": example["source"],
                     "split_group": (
                         "seen"
-                        if report in training_reports
+                        if normalize_report(report) in training_reports
                         else "unseen"
                     ),
                     "radiology_report": report,
@@ -466,6 +467,11 @@ def evaluate_predictions(
 def main():
     """Run inference from the command line."""
     args = parse_args()
+
+    if args.method in ["full", "lora"] and not args.checkpoint:
+        raise ValueError(
+            "--checkpoint is required for full and lora methods."
+        )
 
     if args.audit_overlap:
         audit_dataset_overlap()

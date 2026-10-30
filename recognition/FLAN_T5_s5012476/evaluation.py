@@ -8,6 +8,9 @@ from rouge_score import rouge_scorer
 
 from dataset import load_radiology_dataset
 
+def normalize_report(report):
+    """Normalize case and whitespace for overlap comparison."""
+    return " ".join(str(report).lower().split())
 
 def plot_dataset_overlap(seen_count, unseen_count, output_dir):
     """
@@ -55,10 +58,13 @@ def audit_dataset_overlap():
     train_reports = dataset["train"]["radiology_report"]
     val_reports = dataset["validation"]["radiology_report"]
 
-    unique_train_reports = set(train_reports)
+    unique_train_reports = {
+        normalize_report(report)
+        for report in train_reports
+    }
 
     seen_count = sum(
-        report in unique_train_reports
+        normalize_report(report) in unique_train_reports
         for report in val_reports
     )
 
@@ -164,7 +170,10 @@ def get_training_reports():
     Exact string matching is used to identify overlapping reports.
     """
     dataset = load_radiology_dataset()
-    training_reports = set(dataset["train"]["radiology_report"])
+    training_reports = {
+        normalize_report(report)
+        for report in dataset["train"]["radiology_report"]
+    }
 
     print("\n=== Training Report Index ===")
     print(f"Unique training reports: {len(training_reports):,}")
