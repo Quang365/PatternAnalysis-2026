@@ -18,7 +18,6 @@ from dataset import MODEL_NAME, PROMPT, load_radiology_dataset
 from evaluation import (
     plot_dataset_overlap,
     audit_dataset_overlap,
-    stratified_sample_validation,
     calculate_rouge,
     plot_rouge_scores,
     get_training_reports,
@@ -31,22 +30,24 @@ def load_evaluation_dataset(max_eval_samples=0):
     """
     Load the official validation split for model evaluation.
 
-    For subset evaluation, use stratified sampling to preserve
-    the original seen/unseen distribution.
+    Args:
+        max_eval_samples (int): Maximum samples to evaluate.
+            A value of 0 uses the entire validation split.
+
+    Returns:
+        Dataset: Validation dataset.
     """
     dataset = load_radiology_dataset()
     validation_dataset = dataset["validation"]
-    validation_dataset = validation_dataset.add_column(
-        "original_sample_id",
-        list(range(len(validation_dataset))),
-    )
 
-    if 0 < max_eval_samples < len(validation_dataset):
-        validation_dataset = stratified_sample_validation(
-            validation_dataset,
-            get_training_reports(),
-            n_samples=max_eval_samples,
-            seed=42,
+    if max_eval_samples > 0:
+        sample_count = min(
+            max_eval_samples,
+            len(validation_dataset),
+        )
+
+        validation_dataset = validation_dataset.select(
+            range(sample_count)
         )
 
     print("\n=== Evaluation Dataset ===")
@@ -54,6 +55,8 @@ def load_evaluation_dataset(max_eval_samples=0):
     print(f"Columns: {validation_dataset.column_names}")
 
     return validation_dataset
+
+
 
 def parse_args():
     """Parse inference arguments."""
@@ -324,7 +327,7 @@ def evaluate_predictions(
 
             predictions.append(
                 {
-                    "sample_id": example["original_sample_id"],
+                    "sample_id": index,
                     "source": example["source"],
                     "split_group": (
                         "seen"

@@ -1,6 +1,5 @@
 """ROUGE evaluation, dataset overlap auditing, and result visualisation."""
 
-import random
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -84,47 +83,6 @@ def audit_dataset_overlap():
         unseen_count=unseen_count,
         output_dir=Path("figures"),
     )
-
-import random
-
-def stratified_sample_validation(dataset, training_reports, n_samples=1000, seed=42):
-    """
-    Sample validation reports while preserving the seen/unseen ratio.
-    """
-
-    seen_indices = []
-    unseen_indices = []
-
-    for i, report in enumerate(dataset["radiology_report"]):
-        normalized = normalize_report(report)
-
-        if normalized in training_reports:
-            seen_indices.append(i)
-        else:
-            unseen_indices.append(i)
-
-    total = len(seen_indices) + len(unseen_indices)
-
-    n_seen = round(n_samples * len(seen_indices) / total)
-    n_unseen = n_samples - n_seen
-
-    rng = random.Random(seed)
-
-    sampled_seen = rng.sample(seen_indices, n_seen)
-    sampled_unseen = rng.sample(unseen_indices, n_unseen)
-
-    sampled_indices = sampled_seen + sampled_unseen
-    rng.shuffle(sampled_indices)
-
-    sampled_dataset = dataset.select(sampled_indices)
-
-    print("\n=== Stratified Validation Sampling ===")
-    print(f"Total samples: {len(sampled_dataset)}")
-    print(f"Seen samples: {n_seen}")
-    print(f"Unseen samples: {n_unseen}")
-    print(f"Random seed: {seed}")
-
-    return sampled_dataset
 
 def calculate_rouge(predictions):
     """
