@@ -13,14 +13,12 @@
    - [3.1 Dataset and Preprocessing](#31-dataset-and-preprocessing)
    - [3.2 Data Leakage Analysis](#32-data-leakage-analysis)
 4. [Methodology](#4-methodology)
-   - [4.1 FLAN-T5 and Fine-Tuning Strategies](#41-flan-t5-and-fine-tuning-strategies)
-   - [4.2 Training Procedure](#42-training-procedure)
-   - [4.3 Experimental Setup](#43-experimental-setup)
+   - [4.1 Model and Fine-Tuning Strategies](#41-model-and-fine-tuning-strategies)
+   - [4.2 Training and Experimental Setup](#42-training-and-experimental-setup)
 5. [Results and Evaluation](#5-results-and-evaluation)
    - [5.1 Evaluation Metrics](#51-evaluation-metrics)
    - [5.2 Summarisation Performance](#52-summarisation-performance)
    - [5.3 Computational Efficiency](#53-computational-efficiency)
-   - [5.4 Results Discussion](#54-results-discussion)
 6. [Clinical Safety Analysis](#6-clinical-safety-analysis)
    - [6.1 Qualitative Error Analysis](#61-qualitative-error-analysis)
    - [6.2 Failure Patterns and Root Causes](#62-failure-patterns-and-root-causes)
@@ -223,20 +221,176 @@ Both configurations showed decreasing training and validation losses over three 
 
 ## 5. Results and Evaluation
 ### 5.1 Evaluation Metrics
+
+Summarisation quality is evaluated using **ROUGE-1, ROUGE-2, ROUGE-L, and ROUGE-Lsum** [5], measuring lexical overlap between generated and reference summaries. ROUGE F1 scores are reported for all three configurations.
+
+**Table 5. Evaluation configuration.**
+
+| Parameter | Value |
+|---|---|
+| Dataset | Official validation split (10,000 records) |
+| Batch size | 8 |
+| Decoding | Beam search (4 beams) |
+| Maximum generated tokens | 128 |
+| Hardware | NVIDIA A100 |
+
+To assess the impact of training–validation overlap (Section 3.2), ROUGE is reported on the **full validation set (10,000)**, **seen subset (4,506)**, and **unseen subset (5,494)**.
+
+Since validation data was also used for checkpoint selection, these results do not represent performance on an independent test set. Clinical reliability is examined separately in Section 6.
+
 ### 5.2 Summarisation Performance
+
+All three configurations were evaluated on the full validation set of 10,000 records using identical generation settings.
+
+**Table 6. ROUGE F1 scores on the full validation set.**
+
+| Model | ROUGE-1 | ROUGE-2 | ROUGE-L | ROUGE-Lsum |
+|---|---:|---:|---:|---:|
+| Zero-shot | 0.2246 | 0.0890 | 0.2037 | 0.2037 |
+| Full FT | **0.7477** | **0.5792** | **0.7018** | **0.7018** |
+| LoRA | 0.7098 | 0.5202 | 0.6576 | 0.6576 |
+
+Full FT achieved the highest scores across all metrics, followed by LoRA. Both fine-tuned models substantially outperformed the zero-shot baseline.
+
+**Table 7. Seen vs unseen ROUGE-L comparison.**
+
+| Model | Seen (4,506) | Unseen (5,494) | Gap (Seen − Unseen) |
+|---|---:|---:|---:|
+| Zero-shot | 0.1803 | 0.2228 | -0.0425 |
+| Full FT | **0.7580** | **0.6557** | +0.1023 |
+| LoRA | 0.7303 | 0.5981 | +0.1322 |
+
+Both fine-tuned models performed better on seen reports, suggesting that training–validation overlap may influence evaluation scores. However, differences in report characteristics between subsets may also contribute to the observed gaps.
+
+#### ROUGE Visualisation
+
+The following figures present the ROUGE scores and seen/unseen performance for each configuration.
+
+| Model | Overall ROUGE Scores | Seen vs Unseen ROUGE |
+|---|---|---|
+| Zero-shot | ![](figures/zero_shot_rouge_scores.png) | ![](figures/zero_shot_seen_unseen.png) |
+| Full FT | ![](figures/full_rouge_scores.png) | ![](figures/full_seen_unseen.png) |
+| LoRA | ![](figures/lora_rouge_scores.png) | ![](figures/lora_seen_unseen.png) |
+
+<p align="center">
+  <em>Figure 3, 4, 5, 6, 7, 8: ROUGE performance and seen/unseen comparisons for Zero-shot, Full FT, and LoRA.</em>
+</p>
+
+
 ### 5.3 Computational Efficiency
-### 5.4 Results Discussion
+
+Computational efficiency is compared using trainable parameters, training time, peak GPU memory, and checkpoint size.
+
+**Table 8. Training efficiency comparison.**
+
+| Metric | Full FT | LoRA |
+|---|---:|---:|
+| Trainable parameters | 247,577,856 | 884,736 |
+| Training time (hours) | 3.23 | 3.57 |
+| Peak GPU memory (GB) | 7.82 | 4.68 |
+| Checkpoint size (MB) | ~947 | ~4.5 |
+| Final validation loss | 0.4668 | 0.7654 |
+
+LoRA reduced trainable parameters by **99.64%**, peak GPU memory by **40.15%**, and checkpoint storage by approximately **99.52%** compared with Full FT. However, LoRA training took approximately **10.40% longer**, showing that parameter efficiency does not necessarily translate into faster training.
+
+**Inference Efficiency.**
+
+**Table 9. Inference efficiency on 10,000 validation records.**
+
+| Metric | Zero-shot | Full FT | LoRA |
+|---|---:|---:|---:|
+| Inference time (min) | 43.36 | **37.09** | 44.80 |
+| Latency (s/sample) | 0.2602 | **0.2226** | 0.2688 |
+| Throughput (samples/s) | 3.8435 | **4.4932** | 3.7199 |
+| Peak GPU memory (GB) | 2.442 | 2.442 | 2.445 |
+
+Full FT achieved the highest inference throughput, while all three configurations exhibited similar peak GPU memory usage. LoRA's primary efficiency advantages were observed during training and checkpoint storage rather than inference.
 
 ## 6. Clinical Safety Analysis
+
 ### 6.1 Qualitative Error Analysis
-### 6.2 Failure Patterns and Root Causes
+
+Four validation cases were selected to examine clinically relevant errors across the three configurations.
+
+**Case 1 - Hallucination (Sample 30, Zero-shot)**
+
+- **Source:** "No significant pathological findings."
+- **Generated:** "Do not take this test if you have a history of heart failure. Do not take this test if you have a history of diabetes."
+- **Analysis:** The model generated unrelated medical advice instead of summarising the normal findings. The output also repeatedly reproduced the same statements.
+
+**Case 2 - Information Omission (Sample 12, Zero-shot)**
+
+- **Source:** Cardiomegaly, previous sternotomy, COPD, improving right basal infiltrate, persistent atelectasis, and diaphragmatic abnormality.
+- **Generated:** "Radiologic signs of chronic obstructive pulmonary disease (COPD)."
+- **Analysis:** The model retained only COPD and omitted several findings, demonstrating a failure to preserve important clinical information.
+
+**Case 3 - Unsupported Assertion (Sample 15, Full FT)**
+
+- **Source:** "Endotracheal tube with the distal tip positioned at the level of the right main bronchus."
+- **Generated:** "The breathing tube is in the correct position at the level of the main airway on the right side."
+- **Analysis:** The model introduced "correct position", an interpretation not supported by the source report. This demonstrates that fluent summaries may contain unsupported clinical judgments.
+
+**Case 4 - Negation and Uncertainty (Sample 50, Zero-shot)**
+
+- **Source:** "Questionable increase in lung density in the left upper mid lung field."
+- **Generated:** "No change in lung density in the left upper mid lung field."
+- **Analysis:** The model converted an uncertain finding into a negative statement, changing the clinical meaning. Both fine-tuned models preserved the uncertainty more accurately.
+
+### 6.2 Root Cause Analysis
+
+The errors suggest three main failure patterns:
+
+- **Hallucination:** Generating unsupported information, particularly in Zero-shot outputs.
+- **Information omission:** Failing to retain multiple findings from complex reports.
+- **Meaning distortion:** Altering uncertainty or introducing unsupported interpretations during simplification.
+
+These failures indicate that lexical similarity alone is insufficient to assess clinical safety.
+
 ### 6.3 Recommendations and Limitations
 
+Future work could incorporate clinical entity preservation, negation-aware evaluation, and factual consistency checks.
+
+The analysis is limited to four manually selected examples. These cases demonstrate potential failure modes but do not establish their frequency across the validation dataset. Expert clinical review would be necessary before considering real-world use.
+
 ## 7. Reproducibility
-### 7.1 Environment and Dependencies
-### 7.2 Training and Evaluation Instructions
+
+### 7.1 Environment
+
+Experiments were conducted on the UQ Rangpur HPC cluster using an NVIDIA A100 GPU.
+
+The implementation uses Python, PyTorch, Hugging Face Transformers, PEFT, and Evaluate. All experiments use a fixed random seed of 42.
+
+### 7.2 Reproduction Instructions
+
+Install the required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the training experients:
+```bash
+python train.py --method full --run_name final
+python train.py --method lora --run_name final
+```
+
+Evaluate each configuration:
+```bash
+python predict.py --method zero_shot --evaluate --run_name final
+python predict.py --method full --evaluate --run_name final
+python predict.py --method lora --evaluate --run_name final
+```
+Evaluation generates ROUGE scores, seen/unseen comparisons, inference metrics, predictions, and visualisations.
+
+Training and evaluation can also be executed on Rangpur using the provided Slurm scripts.
 
 ## 8. Conclusion
+
+This project compared Zero-shot, Full Fine-Tuning, and LoRA for radiology report summarisation using FLAN-T5 Base.
+
+Full FT achieved the highest ROUGE scores, while LoRA provided substantial parameter and memory efficiency with slightly lower performance. However, training–validation overlap and qualitative clinical errors highlight limitations in generalisation and factual reliability.
+
+Future work should focus on evaluation using independent test data and improving clinical consistency in generated summaries.
 
 ## 9. References
 
@@ -257,3 +411,7 @@ Both configurations showed decreasing training and validation losses over three 
 [8] Zhao et al. (2026). *X-ray Made Simple: Lay Radiology Report Generation and Robust Evaluation*. Findings of ACL 2026, pp. 34583–34598.
 
 ## 10. AI Usage Disclosure
+
+Generative AI tools (ChatGPT) were used to assist with code debugging, documentation, and improving the clarity of technical explanations.
+
+All experiments, model training, evaluation, and result verification were conducted by the author. AI-generated suggestions were reviewed and validated before integration into the project.

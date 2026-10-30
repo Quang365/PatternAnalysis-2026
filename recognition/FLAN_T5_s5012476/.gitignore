@@ -26,6 +26,7 @@ checkpoints/
 *.safetensors
 
 # Training outputs and experiment logs
+inference/
 outputs/
 runs/
 wandb/
